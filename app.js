@@ -9,22 +9,49 @@ let connects = []
 
 app.use(express.static('public'))
 
+function broadcast(msg, exclude = null) {
+  const data = JSON.stringify(msg)
+  connects.forEach(({ ws }) => {
+    if (ws !== exclude && ws.readyState === 1) ws.send(data)
+  })
+}
+
+function broadcastAll(data) {
+  connects.forEach(({ ws }) => {
+    if (ws.readyState === 1) ws.send(data)
+  })
+}
+
+function sendUserCount() {
+  const count = connects.length
+  broadcastAll(JSON.stringify({ type: 'userCount', count }))
+}
+
 app.ws('/ws', (ws, req) => {
-  connects.push(ws)
+  let clientId = null
 
   ws.on('message', (message) => {
-    console.log('Received:', message)
-
-    connects.forEach((socket) => {
-      if (socket.readyState === 1) {
-        // Check if the connection is open
-        socket.send(message)
+    try {
+      const msg = JSON.parse(message)
+      if (msg.type === 'join') {
+        clientId = msg.id
+        connects.push({ ws, id: clientId })
+        broadcast({ type: 'join', id: clientId }, ws)
+        sendUserCount()
+      } else {
+        broadcastAll(message)
       }
-    })
+    } catch (e) {
+      console.error('Parse error:', e)
+    }
   })
 
   ws.on('close', () => {
-    connects = connects.filter((conn) => conn !== ws)
+    connects = connects.filter((c) => c.ws !== ws)
+    if (clientId) {
+      broadcast({ type: 'leave', id: clientId })
+      sendUserCount()
+    }
   })
 })
 
